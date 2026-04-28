@@ -1,33 +1,37 @@
 # tracelet
 
-> Minimal tracing library for AI agent execution — record, replay, and evaluate every step your agent takes.
+**Lightweight tracing for AI agents.** Wrap your LLM calls and tools, get a structured record of every run — then replay, inspect, evaluate, and snapshot it.
 
-[![npm version](https://img.shields.io/npm/v/tracelet)](https://www.npmjs.com/package/tracelet)
+[![npm](https://img.shields.io/npm/v/tracelet?color=crimson)](https://www.npmjs.com/package/tracelet)
 [![license](https://img.shields.io/npm/l/tracelet)](./LICENSE)
-[![node](https://img.shields.io/node/v/tracelet)](https://nodejs.org)
+[![node](https://img.shields.io/node/v/tracelet?color=brightgreen)](https://nodejs.org)
+[![zero deps](https://img.shields.io/badge/dependencies-0-blue)](./package.json)
 
 ---
 
-## Why tracelet?
-
-When you build AI agents, things go wrong in non-obvious ways. An LLM returns an unexpected format. A tool silently produces the wrong value. A pipeline regresses after a prompt change.
-
-**tracelet** gives you three things:
+## What it does
 
 | | |
 |---|---|
-| 🔍 **Trace** | Wrap your LLM calls and tool executions. Every run is recorded with inputs, outputs, and latency. |
-| 🔁 **Replay** | Re-run any recorded trace deterministically. No live API calls needed. |
-| 🧪 **Evaluate** | Score your agent's output against expected keywords. Know immediately if quality regressed. |
+| **Record** | Every LLM call and tool execution is captured with inputs, outputs, latency, and timestamps |
+| **Inspect** | Print a human-readable trace, or export it as JSON |
+| **Replay** | Re-run any recorded trace deterministically — no live API calls |
+| **Evaluate** | Score your agent's output against expected keywords |
+| **Snapshot** | Freeze a trace and fail fast when your agent's behaviour changes |
+| **CLI** | `tracelet view / export / snapshot` — inspect traces from the terminal |
 
-Zero dependencies. ESM-native. Runs on Node.js 18+.
+Zero dependencies. ESM-native. Node.js 18+.
 
 ---
 
-## Installation
+## Install
 
 ```bash
+# As a library
 npm install tracelet
+
+# As a global CLI tool
+npm install -g tracelet
 ```
 
 ---
@@ -38,93 +42,111 @@ npm install tracelet
 import { trace } from "tracelet";
 
 await trace("answer-question", async (ctx) => {
-  // Wrap your LLM call
-  const answer = await ctx.llm(async () => {
-    return callYourLLM("What is the capital of France?");
-  });
+  const answer = await ctx.llm(
+    async () => callYourLLM("What is the capital of France?"),
+    "What is the capital of France?"   // ← optional prompt, captured in the trace
+  );
 
-  // Wrap any tool your agent uses
   const formatted = await ctx.tool(
     "format-response",
-    (input) => `Answer: ${input.text}`,
-    { text: answer }
+    (input) => `Answer: ${input}`,
+    answer
   );
+
+  return formatted;
 });
 ```
 
-After this runs, your terminal shows:
+After every run, your terminal prints a live summary:
 
 ```
 TRACE: answer-question  (142ms, 2 steps)
 
-→ LLM                    140ms
-→ Tool: format-response    2ms
+→ LLM                      140ms
+  "What is the capital of France?"
+  → "Paris"
+→ Tool: format-response      2ms
 
 ✔ Completed
 ```
 
-And the full trace is saved to `.tracelet/traces.ndjson`.
+The full trace is appended to `.tracelet/traces.ndjson`.
 
 ---
 
-## Core concepts
+## API reference
 
-### Trace
+### `trace(name, fn)`
 
-A **trace** wraps a named agent run. It captures every LLM call and tool invocation inside it, with timing and output.
+The main entry point. Wraps your agent logic and records everything inside it.
 
 ```typescript
 import { trace } from "tracelet";
 
-const result = await trace("my-pipeline", async (ctx) => {
-  // use ctx.llm() and ctx.tool() inside here
-  return "final result";
+const result = await trace("my-agent", async (ctx) => {
+  // use ctx.llm() and ctx.tool() here
+  return "done";
 });
 ```
 
-| Argument | Type | Description |
+| Parameter | Type | Description |
 |---|---|---|
-| `name` | `string` | A human-readable label for this run |
-| `fn` | `async (ctx) => T` | Your agent logic. Receives a trace context. |
+| `name` | `string` | Label for this run |
+| `fn` | `async (ctx) => T` | Your agent logic |
 
 Returns the value your function returns. If your function throws, the error step is recorded and the error is re-thrown.
 
 ---
 
-### ctx.llm()
+### `ctx.llm(fn, prompt?)`
 
-Wraps an async LLM call. Captures latency and output.
+Wraps an async LLM call. Captures latency, output, and optionally the prompt text.
 
 ```typescript
-const reply = await ctx.llm(async () => {
-  return openai.chat.completions.create({ ... });
-});
+const reply = await ctx.llm(
+  async () => openai.chat.completions.create({ ... }),
+  "Summarise this document in 3 sentences"   // prompt shown in CLI + stored in trace
+);
 ```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `fn` | `() => Promise<T>` | Your LLM call |
+| `prompt` | `string` *(optional)* | The prompt text — stored as `prompt` on the step |
 
 ---
 
-### ctx.tool()
+### `ctx.tool(name, fn, input)`
 
 Wraps a named tool execution. Captures the tool name, input, output, and latency.
 
 ```typescript
-const result = await ctx.tool(
-  "search-web",           // tool name
-  async (q) => fetchResults(q),  // tool function
-  "latest AI news"        // input passed to the function
+const data = await ctx.tool(
+  "fetch-weather",
+  async (city) => getWeather(city),
+  "London"
 );
 ```
 
+| Parameter | Type | Description |
+|---|---|---|
+| `name` | `string` | Tool identifier shown in the trace |
+| `fn` | `(input) => T \| Promise<T>` | Tool implementation |
+| `input` | `TInput` | The value passed to `fn` |
+
 ---
 
-### Replay
+### `replay(traceId, options?)`
 
-Replay a previously recorded trace by its ID. Returns the stored output for every step — no live API calls are made.
+Re-runs a recorded trace deterministically. Returns stored step outputs without making live API calls.
 
 ```typescript
 import { replay } from "tracelet";
 
-const result = await replay("a3f2c1d4-...", { mode: "mock" });
+const result = await replay("a3f2c1d4-...", {
+  mode: "mock",      // return stored outputs (default)
+  verbose: true      // print each step as it replays, including prompt/response
+});
 
 console.log(result.results);
 // [
@@ -133,59 +155,155 @@ console.log(result.results);
 // ]
 ```
 
-| Option | Values | Default | Description |
+| Option | Type | Default | Description |
 |---|---|---|---|
-| `mode` | `"mock"` \| `"full"` | `"mock"` | `mock` returns stored outputs. `full` is scaffolded for real re-execution in a future release. |
+| `mode` | `"mock" \| "full"` | `"mock"` | `mock` returns stored outputs |
+| `verbose` | `boolean` | `false` | Print step-by-step output with prompt/response |
 
 ---
 
-### Evaluate
+### `evaluate({ input, expected, actual })`
 
-A pure, dependency-free keyword scorer. Give it what you expected the agent to say, and what it actually said.
+A pure, dependency-free keyword scorer. No embeddings, no LLM calls.
 
 ```typescript
 import { evaluate } from "tracelet";
 
 const result = evaluate({
-  input: "What is the capital of France?",  // context (metadata only)
-  expected: ["paris", "france", "capital"], // keywords that should appear
-  actual: "The capital of France is Paris.", // agent's actual output
+  input: "What is the capital of France?",
+  expected: ["paris", "france", "capital"],
+  actual: "The capital of France is Paris.",
 });
 
-// {
-//   score: 1,
-//   passed: true,
-//   matched: ["paris", "france", "capital"],
-//   missing: []
-// }
+// { score: 1, passed: true, matched: ["paris", "france", "capital"], missing: [] }
 ```
 
 Scoring rules:
-
-- `score = matched keywords / total expected keywords`
+- `score = matched / total expected` (0.0 – 1.0)
 - `passed = score >= 0.6`
 - Matching is **case-insensitive**
 
-| Field | Type | Description |
-|---|---|---|
-| `score` | `number` | `0.0` – `1.0` |
-| `passed` | `boolean` | `true` if score ≥ 0.6 |
-| `matched` | `string[]` | Keywords found in output |
-| `missing` | `string[]` | Keywords not found in output |
+---
+
+### `view(traceId)`
+
+Prints a numbered, human-readable trace to the terminal.
+
+```typescript
+import { view } from "tracelet";
+
+await view("a3f2c1d4-...");
+```
+
+```
+TRACE: answer-question  (2 steps)
+
+ 1. LLM       0ms
+    prompt:  "What is the capital of France?"
+    result:  "Paris"
+ 2. Tool: format-response   1ms
+```
 
 ---
 
-## Trace storage
+### `exportTrace(traceId)`
 
-Every trace is appended as a single JSON line to:
+Returns the full trace as a pretty-printed JSON string. Does not print anything — pipe it wherever you need.
+
+```typescript
+import { exportTrace } from "tracelet";
+
+const json = await exportTrace("a3f2c1d4-...");
+await fs.writeFile("trace.json", json);
+```
+
+---
+
+### `expectTrace(name).toMatchSnapshot()`
+
+Snapshot testing for agent behaviour. Finds the most recent trace with the given name and compares it to a saved snapshot.
+
+```typescript
+import { expectTrace } from "tracelet";
+
+// In your test suite — after running your agent:
+await expectTrace("answer-question").toMatchSnapshot();
+```
+
+**First run** — creates `.tracelet/__snapshots__/answer-question.json`
+
+**Subsequent runs** — compares against the saved snapshot. Throws on mismatch:
+```
+[tracelet] Snapshot mismatch at line 14
+  snapshot: "output": "Paris"
+  received: "output": "Lyon"
+Delete .tracelet/__snapshots__/answer-question.json to update the snapshot.
+```
+
+Delete the snapshot file to accept new behaviour as the baseline.
+
+---
+
+## CLI
+
+```bash
+npm install -g tracelet
+```
+
+### Commands
+
+```bash
+# Print a human-readable trace
+tracelet view <traceId>
+
+# Output full trace JSON (pipe-friendly)
+tracelet export <traceId>
+tracelet export <traceId> > trace.json
+
+# Create or verify a snapshot
+tracelet snapshot <traceName>
+
+# Help
+tracelet --help
+```
+
+### Example output
+
+```
+$ tracelet view a3f2c1d4-...
+
+TRACE: answer-question  (2 steps)
+
+ 1. LLM       140ms
+    prompt:  "What is the capital of France?"
+    result:  "Paris"
+ 2. Tool: format-response   2ms
+```
+
+### If `tracelet` is not recognised on Windows
+
+npm installs global bin shims into a folder that may not be on your `PATH`.
+
+1. Find your npm global prefix:
+   ```powershell
+   npm config get prefix
+   ```
+2. Add the returned path to your user `PATH` (System Properties → Environment Variables → Path → New).
+3. Restart your terminal.
+
+> On macOS / Linux the global bin is usually `/usr/local/bin`. If not, add `$(npm config get prefix)/bin` to your shell's `$PATH`.
+
+---
+
+## Storage format
+
+Every trace is appended as one JSON line to:
 
 ```
 .tracelet/traces.ndjson
 ```
 
-The directory is created automatically. Each line is an independent, self-contained JSON object — safe to append concurrently, easy to stream, and trivial to parse.
-
-**Example line (formatted for readability):**
+The directory is created automatically. Each line is a self-contained JSON object — safe to append concurrently and trivial to stream.
 
 ```json
 {
@@ -196,15 +314,17 @@ The directory is created automatically. Each line is an independent, self-contai
   "steps": [
     {
       "type": "llm",
-      "input": null,
+      "input": "What is the capital of France?",
       "output": "Paris",
       "latency": 140,
-      "timestamp": 1714286400001
+      "timestamp": 1714286400001,
+      "prompt": "What is the capital of France?",
+      "response": "Paris"
     },
     {
       "type": "tool",
       "name": "format-response",
-      "input": { "text": "Paris" },
+      "input": "Paris",
       "output": "Answer: Paris",
       "latency": 2,
       "timestamp": 1714286400141
@@ -213,13 +333,13 @@ The directory is created automatically. Each line is an independent, self-contai
 }
 ```
 
-Add `.tracelet/` to your `.gitignore` to keep trace data out of version control.
+Add `.tracelet/` to your `.gitignore`.
 
 ---
 
 ## Error handling
 
-If a step throws, tracelet records the failure as an `"error"` step — with the tool name and input preserved — then re-throws the original error so your code still sees it.
+When a step throws, tracelet records an `"error"` step — with the tool name and input preserved — then re-throws the original error so your code still handles it.
 
 ```typescript
 try {
@@ -228,16 +348,19 @@ try {
   });
 } catch (err) {
   // err is the original SyntaxError
-  // the trace was still saved with an error step
+  // trace was saved with type: "error" step intact
 }
 ```
 
-CLI output for a failed run:
+Terminal output:
 
 ```
 TRACE: risky-pipeline  (1ms, 1 step)
 
 → ERROR   0ms
+  step:    tool parse-json
+  input:   "{ bad json"
+  message: "Unexpected token 'b', "{ bad json" is not valid JSON"
 
 ✖ Failed
 ```
@@ -246,47 +369,17 @@ TRACE: risky-pipeline  (1ms, 1 step)
 
 ## TypeScript types
 
-All types are exported for use in your own code:
-
 ```typescript
 import type {
-  TraceRecord,   // a complete recorded trace
-  Step,          // a single step (llm | tool | error)
-  StepType,      // "llm" | "tool" | "error"
-  TraceContext,  // the ctx object passed to your trace function
-  ReplayResult,  // return value of replay()
-  EvaluateResult // return value of evaluate()
+  TraceRecord,    // complete recorded trace
+  Step,           // single step: llm | tool | error
+  StepType,       // "llm" | "tool" | "error"
+  TraceContext,   // ctx passed to your trace function
+  ReplayOptions,  // options for replay()
+  ReplayResult,   // return value of replay()
+  EvaluateResult  // return value of evaluate()
 } from "tracelet";
 ```
-
----
-
-## CLI (global install)
-
-```bash
-npm install -g tracelet
-```
-
-```bash
-tracelet view     <traceId>        # print a human-readable trace
-tracelet export   <traceId>        # output trace as JSON (pipe-friendly)
-tracelet snapshot <traceName>      # create or verify a snapshot
-tracelet --help
-```
-
-### If `tracelet` is not recognised on Windows
-
-npm installs global bin shims into a folder that may not be on your `PATH`.
-
-1. Find the npm global prefix:
-   ```powershell
-   npm config get prefix
-   ```
-2. Add the returned path to your user `PATH` (System Properties → Environment Variables → Path → New).
-3. Restart your terminal and run `tracelet --help`.
-
-> On macOS/Linux the global bin directory is usually `/usr/local/bin` (already on `PATH`).  
-> If not, add the output of `npm config get prefix`/bin to your shell's `$PATH`.
 
 ---
 
@@ -299,4 +392,4 @@ npm installs global bin shims into a folder that may not be on your `PATH`.
 
 ## License
 
-MIT
+MIT © [zmrishh](https://github.com/zmrishh)
