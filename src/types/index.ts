@@ -7,6 +7,9 @@ export interface Step {
   name?: string;
   latency: number;
   timestamp: number;
+  // v0.2 — optional debug fields; absent on traces recorded before v0.2
+  prompt?: string;    // LLM step: the prompt text passed to the model
+  response?: string;  // LLM step: string representation of the model output
 }
 
 export interface TraceRecord {
@@ -18,7 +21,8 @@ export interface TraceRecord {
 }
 
 export interface TraceContext {
-  llm<T>(fn: () => Promise<T>): Promise<T>;
+  /** Wrap an async LLM call. Pass `prompt` to capture the input text in the trace. */
+  llm<T>(fn: () => Promise<T>, prompt?: string): Promise<T>;
   tool<TInput, TOutput>(
     name: string,
     fn: (input: TInput) => TOutput | Promise<TOutput>,

@@ -6,3 +6,7 @@ export type { ReplayOptions, ReplayResult, StepReplayResult } from "./replay/rep
 
 export { evaluate } from "./eval/evaluate.js";
 export type { EvaluateInput, EvaluateResult } from "./eval/evaluate.js";
+
+export { view } from "./view/view.js";
+export { exportTrace } from "./export/export.js";
+export { expectTrace } from "./testing/snapshot.js";

@@ -1,11 +1,15 @@
 {
   "name": "tracelet",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Minimal, extensible tracing library for AI agent execution",
   "type": "module",
 
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+
+  "bin": {
+    "tracelet": "dist/cli.js"
+  },
 
   "exports": {
     ".": {
@@ -19,14 +23,17 @@
 
   "scripts": {
     "build": "tsc",
+    "postbuild": "node scripts/set-executable.cjs",
     "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && node scripts/validate-cli.cjs"
   },
 
   "engines": {
     "node": ">=18.0.0"
   },
 
+  "keywords": ["ai", "agent", "tracing", "llm", "observability", "cli"],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -261,6 +261,35 @@ import type {
 
 ---
 
+## CLI (global install)
+
+```bash
+npm install -g tracelet
+```
+
+```bash
+tracelet view     <traceId>        # print a human-readable trace
+tracelet export   <traceId>        # output trace as JSON (pipe-friendly)
+tracelet snapshot <traceName>      # create or verify a snapshot
+tracelet --help
+```
+
+### If `tracelet` is not recognised on Windows
+
+npm installs global bin shims into a folder that may not be on your `PATH`.
+
+1. Find the npm global prefix:
+   ```powershell
+   npm config get prefix
+   ```
+2. Add the returned path to your user `PATH` (System Properties → Environment Variables → Path → New).
+3. Restart your terminal and run `tracelet --help`.
+
+> On macOS/Linux the global bin directory is usually `/usr/local/bin` (already on `PATH`).  
+> If not, add the output of `npm config get prefix`/bin to your shell's `$PATH`.
+
+---
+
 ## Requirements
 
 - **Node.js** 18 or later

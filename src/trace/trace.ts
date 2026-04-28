@@ -53,7 +53,7 @@ export async function trace<T>(name: string, fn: TraceFn<T>): Promise<T> {
   const t = new Trace(name);
 
   const ctx: TraceContext = {
-    llm: (fn) => wrapLlm(t, fn),
+    llm: (fn, prompt) => wrapLlm(t, fn, prompt),
     tool: (toolName, fn, input) => wrapTool(t, toolName, fn, input),
   };
 

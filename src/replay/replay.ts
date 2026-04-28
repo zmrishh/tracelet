@@ -1,9 +1,5 @@
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
-import { join } from "node:path";
-import type { TraceRecord, StepType } from "../types/index.js";
-
-const TRACES_FILE = join(".tracelet", "traces.ndjson");
+import type { StepType } from "../types/index.js";
+import { findTrace } from "../trace/reader.js";
 
 export interface StepReplayResult {
   stepIndex: number;
@@ -19,58 +15,27 @@ export interface ReplayResult {
 
 export interface ReplayOptions {
   mode?: "mock" | "full";
-}
-
-function isTraceRecord(value: unknown): value is TraceRecord {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as Record<string, unknown>).id === "string" &&
-    Array.isArray((value as Record<string, unknown>).steps)
-  );
-}
-
-async function findTrace(traceId: string): Promise<TraceRecord | null> {
-  const stream = createReadStream(TRACES_FILE, { encoding: "utf-8" });
-  const rl = createInterface({ input: stream, crlfDelay: Infinity });
-
-  try {
-    for await (const line of rl) {
-      const trimmed = line.trim();
-      if (trimmed === "") continue;
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        continue; // skip malformed lines, do not abort the search
-      }
-
-      if (isTraceRecord(parsed) && parsed.id === traceId) {
-        return parsed;
-      }
-    }
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  } finally {
-    // rl.close() alone does not close the underlying ReadStream — destroy it
-    // explicitly to avoid leaking the file handle on early exit.
-    stream.destroy();
-  }
-
-  return null;
+  /**
+   * When true, prints each replayed step to stdout — useful for inspecting
+   * prompt/response debug fields captured with v0.2+.
+   */
+  verbose?: boolean;
 }
 
 export async function replay(
   traceId: string,
   options: ReplayOptions = {}
 ): Promise<ReplayResult> {
-  const mode = options.mode ?? "mock";
+  const mode    = options.mode    ?? "mock";
+  const verbose = options.verbose ?? false;
 
   const record = await findTrace(traceId);
   if (record === null) {
     throw new Error(`[tracelet] Trace not found: "${traceId}"`);
+  }
+
+  if (verbose) {
+    console.log(`\n[tracelet replay] "${record.name}" — ${record.steps.length} step(s)`);
   }
 
   const results: StepReplayResult[] = [];
@@ -83,13 +48,29 @@ export async function replay(
     // future phase without requiring a signature change.
     void mode;
 
-    results.push({
+    const result: StepReplayResult = {
       stepIndex: i,
       type: step.type,
       ...(step.name !== undefined && { name: step.name }),
       output: step.output,
-    });
+    };
+
+    if (verbose) {
+      const label = step.type === "tool" ? `tool:${step.name ?? "?"}` : step.type;
+      console.log(`  [${i}] ${label}  ${step.latency ?? 0}ms`);
+      if (step.prompt)   console.log(`        prompt   → ${truncateVerbose(step.prompt)}`);
+      if (step.response) console.log(`        response → ${truncateVerbose(step.response)}`);
+    }
+
+    results.push(result);
   }
 
+  if (verbose) console.log("");
+
   return { traceId, results };
+}
+
+const VERBOSE_MAX = 120;
+function truncateVerbose(str: string): string {
+  return str.length <= VERBOSE_MAX ? str : str.slice(0, VERBOSE_MAX - 1) + "…";
 }

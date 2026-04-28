@@ -9,6 +9,8 @@ const ANSI = {
   cyan:  "\x1b[36m",
 };
 
+const PREVIEW_MAX = 80;
+
 function stepLabel(step: Step): string {
   if (step.type === "tool") return `Tool: ${step.name ?? "unknown"}`;
   if (step.type === "llm")  return "LLM";
@@ -38,6 +40,46 @@ function totalDuration(trace: TraceRecord): number {
   return trace.steps.reduce((sum, s) => sum + (s.latency ?? 0), 0);
 }
 
+function truncate(str: string, max: number): string {
+  return str.length <= max ? str : str.slice(0, max - 1) + "…";
+}
+
+/**
+ * Returns zero or more preview lines to print below a step's main row.
+ * LLM steps: show prompt → response.
+ * Error steps: show step context + message.
+ */
+function stepPreviewLines(step: Step): string[] {
+  const lines: string[] = [];
+
+  if (step.type === "llm") {
+    if (step.prompt) {
+      lines.push(`  ${ANSI.dim}"${truncate(step.prompt, PREVIEW_MAX)}"${ANSI.reset}`);
+    }
+    if (step.response) {
+      lines.push(`  ${ANSI.dim}→ "${truncate(step.response, PREVIEW_MAX)}"${ANSI.reset}`);
+    }
+  }
+
+  if (step.type === "error") {
+    if (step.name) {
+      const kind = step.name === "llm" ? "LLM" : `Tool ${step.name}`;
+      lines.push(`  ${ANSI.dim}step: ${kind}${ANSI.reset}`);
+    }
+    if (step.input !== null && step.input !== undefined) {
+      const raw = typeof step.input === "string"
+        ? step.input
+        : JSON.stringify(step.input);
+      lines.push(`  ${ANSI.dim}input: ${truncate(raw, PREVIEW_MAX)}${ANSI.reset}`);
+    }
+    if (typeof step.output === "string" && step.output.length > 0) {
+      lines.push(`  ${ANSI.dim}message: "${truncate(step.output, PREVIEW_MAX)}"${ANSI.reset}`);
+    }
+  }
+
+  return lines;
+}
+
 export function printTraceSummary(trace: TraceRecord): void {
   try {
     const duration   = totalDuration(trace);
@@ -46,11 +88,11 @@ export function printTraceSummary(trace: TraceRecord): void {
     const hasFailed  = trace.steps.some((s) => s.type === "error");
     const stepWord   = stepCount === 1 ? "step" : "steps";
 
-    const labels      = trace.steps.map(stepLabel);
-    const maxLabelLen = labels.reduce((max, l) => Math.max(max, l.length), 3);
-    const labelCol    = maxLabelLen + 3; // 3-space gap after longest label
+    const labels        = trace.steps.map(stepLabel);
+    const maxLabelLen   = labels.reduce((max, l) => Math.max(max, l.length), 3);
+    const labelCol      = maxLabelLen + 3;
 
-    const latencyStrs  = trace.steps.map((s) => `${s.latency ?? 0}ms`);
+    const latencyStrs   = trace.steps.map((s) => `${s.latency ?? 0}ms`);
     const maxLatencyLen = latencyStrs.reduce((max, s) => Math.max(max, s.length), 2);
 
     console.log(
@@ -71,6 +113,10 @@ export function printTraceSummary(trace: TraceRecord): void {
           `${padRight(label, labelCol)}` +
           `${ANSI.dim}${padLeft(latency, maxLatencyLen)}${ANSI.reset}`
         );
+
+        for (const line of stepPreviewLines(step)) {
+          console.log(line);
+        }
       }
     }
 
