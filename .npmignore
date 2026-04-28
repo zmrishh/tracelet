@@ -1,0 +1,30 @@
+# Source — consumers only need the compiled dist/
+src/
+
+# Dev tooling
+tsconfig.json
+tsconfig*.json
+
+# Test and example files
+examples/
+test-app/
+example.ts
+example-*.ts
+
+# Local runtime data
+.tracelet/
+.agentlens/
+*.ndjson
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
